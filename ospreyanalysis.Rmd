@@ -1,0 +1,320 @@
+---
+title: "Analysis of Finnish osprey egg data for environmental pollutants"
+author: "Jouni Tuomisto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Preprocess the data
+
+TODO
+
+* Add units to every column
+* Split code into blocks
+* tell "LOG" in graph
+* Add conclusions
+* Peak year cannot be estimated
+* Make a decent imputation with values predicted() from an lm() model. Make group-specific models.
+* Reanalyse without NA imputations, unless predictions work really well.
+* Calculate BDE trends after 1995.
+* We should compare the concentration trends with legislation of banning or restricting the use of each chemical. Does the data show that banning is an effective way to reduce concentrations in the environment?
+
+```{r preprocess}
+library(openxlsx)
+library(tidyverse)
+
+# Impute values if missing or below detection limit
+impute_values <- function(s, detection_limit=NULL, not_detected_value=0, impute_missing=FALSE) {
+  if(is.null(detection_limit)) {
+    detection_limit <- min(s[s > not_detected_value], na.rm=TRUE)
+  }
+  s[s < detection_limit] <- 0.5 * detection_limit
+  if(impute_missing) {
+    s[is.na(s)] <- mean(s, na.rm=TRUE)
+  }
+  return(s)
+}
+
+df <- read.xlsx("data/Saaksidatabase_updated_2021-11-FINAL_02032023.xlsx", sheet="Data_sorted")
+colnames(df) <- gsub("Total.PCDD/F-TEQ.+.PCB-TEQ", "PCDDF_PCB_TEQ", colnames(df))
+colnames(df) <- gsub("\\.", "_", colnames(df))
+colnames(df) <- gsub("-", "_", colnames(df))
+colnames(df) <- gsub(",", "_", colnames(df))
+colnames(df) <- gsub("'", "_", colnames(df))
+colnames(df) <- gsub("\\/", "_", colnames(df))
+df <- df[c(1:3, 5:137)]
+colnames(df)[c(4:12, 14:19)] <- paste0("X", colnames(df)[c(4:12, 14:19)])
+drop <- c("BDE_71", "BDE_190", "PBB_18", "PBB_38", "PBB_169", "Pd", "Pt", "Rh") # Too much missing
+df <- df[!colnames(df) %in% drop]
+colnames(df)
+for(col in 4:ncol(df)) {
+  df[[col]] <- impute_values(df[[col]])
+}
+ldf <- df
+for(col in 4:ncol(ldf)) {
+  ldf[[col]] <- log10(df[[col]])
+}
+
+n <- colnames(df)
+group <- ifelse(grepl("PCB", n), "PCB", 
+                ifelse(grepl("PBB", n), "PBB",
+                       ifelse(grepl("BDE", n), "BDE",
+                         ifelse(grepl("PCN", n), "PCN",
+                                ifelse(grepl("F", n), "PCDF",
+                                       ifelse(grepl("_DD", n), "DDT",
+                                              ifelse(grepl("D", n), "PCDD", "metal"
+                                                     )
+                                       )
+                                )
+                         )
+                       )
+                )
+)
+group[1:3] <- "meta"
+
+# The best-correlated compound from each chemical group (see correlation analysis)
+index_compounds <- c("X123678_HxD", "X123678_HxF", "BDE_100", "PCB_128", "PCN_52", "PBB_154", "p_p__DDE", "Pb")
+
+```
+## Overview of the data
+
+```{r overview}
+out <- list()
+for(col in colnames(df)[colnames(df) %in% index_compounds]) {
+  g <- ggplot(df, aes_string(x="Year", y=col, color="Area"))+
+    geom_point()+geom_smooth()+
+    labs(y="Concentration", title=col)
+  print(g)
+}
+
+for(col in colnames(ldf)[colnames(df) %in% index_compounds]) {
+  g <- ggplot(ldf, aes_string(x="Year", y=col, color="Area"))+
+    geom_point()+geom_smooth()+
+    labs(y="Concentration (Log10)", title=col)
+  print(g)
+}
+
+```
+## Correlaton analysis within chemical groups
+
+One compound from each chemical group was chosen as the index compound based on the highest average correlation with the other compounds in that group. These index compounds are 123678_HxD, 123678_HxF, BDE_100, PCB_128, PCN_52, PBB_154, p_p'_DDE, Pb.
+Typically, there are strong correlations within each chemical group, except:
+
+* 123789HxF, 1234789HpF, and OCDF do not correlate well with anything.
+* PCN48, 73, 74, 75 correlate poorly with other PCN.
+* In general PBB correlate poorly but this group correlates fairly well: PBB 75, 101, 103, 153, 154, 155.
+* o,p-DDD, p,p'-DDD and p,p'-DDE correlate with each other but other DDT metabolites correlate poorly.
+* Metals correlate poorly except Pb with Cr, Cu; and Hg and Me-Hg with each other.
+* The compound groups correlate well: dioxins, furans, PCBs, PCN, and DDT.
+    + However, BDE and PBB correlate with each other but not with anything else.
+    + Pb correlates somewhat with DDT but negatively with PBB and especially with BDE.
+
+```{r correlations}
+
+### CORRELATION ANALYSES
+
+library(car) # scatterplotMatrix
+library(Hmisc)
+library(corrplot)
+library(PerformanceAnalytics)  # chart.Correlation()
+
+# Insignificant correlations are leaved blank
+#corrplot(rcorr(as.matrix(ldf[group=="PCDF"]))$r, type="upper", order="hclust",
+#         p.mat = res2$P, sig.level = 0.05, insig = "blank") # FIXME p.mat of wrong shape?!
+
+#cr <- melt(cor(ldf[cols], use="pairwise.complete.obs"))
+
+#scatterplotMatrix(ldf[group=="PCDD"])
+
+# ^ alternative ways to plot correlations, not used
+
+corrplot(rcorr(as.matrix(ldf[group=="PCDD"]))$r, type="upper", order="hclust")
+rowSums(cor(df[group=="PCDD"], use="pairwise.complete.obs"))  # Best correlation: 123678HxD
+
+corrplot(rcorr(as.matrix(ldf[group=="PCDF"]))$r, type="upper", order="hclust")
+rowSums(cor(ldf[group=="PCDF"], use="pairwise.complete.obs"))  # Best correlation: 123678_HxF
+
+corrplot(rcorr(as.matrix(ldf[group=="BDE"][-c(3, 7, 11)]))$r, type="upper", order="hclust")
+rowSums(cor(ldf[group=="BDE"], use="pairwise.complete.obs")) # Best correlation: BDE_100
+
+temp <- ldf[group=="PCB"][-c(5, 6, 7, 41:44)]  # Drop co_PCB_Sum, co_PCB_TEQ, co_PCB_WHO_TEQ PCB_Sum_ng_g, PCB_WHO_TEQ, PCDDF_PCB_TEQ, Ind__PCB_sum_ng_g
+corrplot(rcorr(as.matrix(temp))$r, type="upper", order="hclust")
+rowSums(cor(ldf[group=="PCB"], use="pairwise.complete.obs")) # Best correlation: PCB_128
+
+corrplot(rcorr(as.matrix(ldf[group=="PCN"]))$r, type="upper", order="hclust")
+rowSums(cor(ldf[group=="PCN"], use="pairwise.complete.obs"))  # Best correlation: PCN_52
+
+corrplot(rcorr(as.matrix(ldf[group=="PBB"]))$r, type="upper", order="hclust")
+rowSums(cor(ldf[group=="PBB"], use="pairwise.complete.obs"))  # Best correlation: PBB_154
+
+corrplot(rcorr(as.matrix(ldf[group=="DDT"]))$r, type="upper", order="hclust")
+rowSums(cor(ldf[group=="DDT"], use="pairwise.complete.obs"))  # Best correlation: p_p__DDE
+cor(ldf[group=="DDT"], ldf["p_p__DDE"], use="pairwise.complete.obs")
+
+corrplot(rcorr(as.matrix(ldf[group=="metal"]))$r, type="upper", order="hclust")
+rowSums(cor(ldf[group=="metal"], use="pairwise.complete.obs"))  # Best correlation: Pb
+
+corrplot(rcorr(as.matrix(ldf[colnames(ldf) %in% index_compounds]))$r, type="upper", order="hclust")
+cor(ldf[index_compounds], use="pairwise.complete.obs")
+
+chart.Correlation(ldf[colnames(ldf) %in% index_compounds], histogram=TRUE, pch=19)
+
+```
+## Bayesian hierarchical model
+
+The purpose of the Bayesian model was to estimate the peak year of the concentration for each congener. This did not
+work out, as the trend curve to be fitted was too rigid. I did not attempt to tweak the model as the geom_smooth()
+function of the ggplot2 was good enough. We can see that
+
+* There is a clear decreasing trend for all furans, dioxins and PCBs since the 1970's.
+* However, there is a slight but consistent bump upwards during 1985-1995 with most of these compounds.
+* Exceptions are: OCDF, which becomes almost undetectable by 1990.
+    + Co-PCB-SUM(TEQ), where the bump is later, 1990-2000.
+    + PCB-123, where the bump last 1985-2005.
+* All BDE show rapid increase until 1995, after which they either stay constant or start decresing.
+    + We should categorise BDE into two groups based on trends after 1995. Does this reflect policies?
+* Most PBB have too little data to see clear trends. However, PBBs -75, 153, 154, 155 show clear increase until 1997 and then decrease.
+* PCN: flat until 1995, then decrease. But e.g. PCN-68 starts to decrease already 1985.
+* DDT: constant decrease during the whole period. Some compounds are already hard to detect.
+* Hg, Me-Hg: Decrease since 1995.
+* Pb: strong decrease after 1980-1985. 90 % decrease by 1998.
+
+
+```{r bayes}
+
+## Bayesian hierachical model
+
+# This was originally forked from code Op_en3104/bayes on page [[EU-kalat]]
+# The immediate fork is from https://github.com/jtuomist/dioxdisthuman/blob/master/Dioxboys_individual_rows.Rmd#L460
+
+#library(OpasnetUtils)
+library(reshape2)
+library(rjags) # JAGS
+library(MASS) # mvrnorm
+
+N <- 100  # params$N # defined as render parameter
+
+# Hierarchical Bayes model.
+# Model parabel-shaped parameterised
+# y = -ax^2 + bx + c  # Because we want to force down-opening parabola, a>0
+# peak = -b/-2a <=> b = peak * 2a
+
+mod <- textConnection(
+  "
+  model{
+    for(congener in congeners) {
+      tau[congener] ~ dgamma(1.0, 1.0)
+      a[congener] ~ dnorm(0, 0.0001)
+      c[congener] ~ dnorm(0, 0.0001)
+      peak[congener] ~ dnorm(0, 0.0001)
+
+      for(egg in eggs) {
+        #        below.LOQ[i,j] ~ dinterval(-conc[i,j], -LOQ[j])
+        conc[egg,congener] ~ dnorm(mu[egg,congener], tau[congener])
+        mu[egg,congener] <- -1 * a[congener] * (time[egg] - 1990)**2 +
+          peak[congener] * 2 * a[congener] * (time[egg] - 1990) + c[congener]
+      }
+    }
+  }
+")
+
+jags <- jags.model(
+  mod,
+  data = list(
+    eggs = 1:nrow(ldf),
+    congeners = 1:(ncol(ldf)-3), #sum(group=="PCDD"),
+    conc = data.matrix(ldf[4:ncol(ldf)]), #group=="PCDD"]),
+    time = ldf[["Year"]]
+  ),
+  n.chains = 4,
+  n.adapt = 1000
+)
+
+samps.j <- jags.samples(
+  jags, 
+  c(
+    'mu', 
+    'tau',
+    'peak',
+    'a',
+    'c'
+  ), 
+  thin=100,
+  N*100
+)
+
+# Postprocess the model output
+cols <- colnames(ldf)[4:ncol(ldf)]
+comp <- paste0(cols, "_p")
+dimnames(samps.j$mu) <- list(Id = 1:nrow(ldf), Compound = comp, Iter = 1:N, Chain = 1:4)
+dimnames(samps.j$tau) <- list(Compound = comp, Iter = 1:N, Chain = 1:4)
+dimnames(samps.j$peak) <- list(Compound = comp, Iter = 1:N, Chain = 1:4)
+dimnames(samps.j$a) <- list(Compound = comp, Iter = 1:N, Chain = 1:4)
+dimnames(samps.j$c) <- list(Compound = comp, Iter = 1:N, Chain = 1:4)
+
+#samps.j$teq[,3,,] <- apply(samps.j$teq[,1:2,,],c(1,3,4), function(x) log(sum(exp(x)))) # Fill in Total_TEQ slot in TEQ
+
+# The the PCDDF_TEQ as the main outcome
+
+out <- cbind(
+  ldf,
+  (apply(samps.j$mu, MARGIN=c("Id","Compound"), FUN=mean))
+#  exp(apply(samps.j$teq, MARGIN=c("Subgroup","TEQ"), FUN=mean)),
+#  exp(t(apply(samps.j$teq[,1,,], MARGIN=c("Subgroup"), FUN=function(x) quantile(x, probs = c(0.05,0.5,0.95))))),
+#  exp(t(apply(samps.j$teq[,2,,], MARGIN=c("Subgroup"), FUN=function(x) quantile(x, probs = c(0.05,0.5,0.95))))),
+#  exp(t(apply(samps.j$teq[,3,,], MARGIN=c("Subgroup"), FUN=function(x) quantile(x, probs = c(0.05,0.5,0.95))))),
+#  Sample = exp(apply(samps.j$teq[,,,], MARGIN=c("Subgroup","TEQ"), FUN=function(x) sample(x, size=1))),
+#  P_exceed = apply(samps.j$teq[,,,], MARGIN=c("Subgroup","TEQ"), FUN=function(x) mean(x>log(7)))
+)
+
+for(col in cols) {
+  g <- ggplot(out, aes_string(x="Year", y=col))+
+    geom_point()+
+    geom_smooth()+
+    geom_point(y=out[[paste0(col, "_p")]], color="red")+
+    labs(y="Concentration (log10)", title=col)
+  print(g)
+}
+
+```
+
+## Principal coordinate analysis
+
+This analysis looks at individual compounds and their resemblance with each other based on their variation between individual egg samples.
+
+I am not sure what to make out of this.
+
+```{r pcoa}
+
+### PRINCIPAL COORDINATES ANALYSIS
+# Code from http://en.opasnet.org/w/How_scientists_perceive_the_evolutionary_origin_of_human_traits:_results_of_a_survey_study#Principal_coordinates_and_component_analyses.2C_linear_regression
+# run PCoA with people as the units of observation
+answ <- df[cols]
+for(col in colnames(answ)) {
+  answ[[col]] <- log10(impute_values(answ[[col]], impute_missing=TRUE))
+}
+
+answ <- t(as.matrix(answ[!colnames(answ) %in% drop]))
+
+pcoa <- cmdscale(dist(answ))
+pcoa <- as.data.frame(pcoa)
+pcoa$name <- rownames(pcoa)
+pcoa$group <- group[-c(1:3)]
+pcoa$index <- ifelse(pcoa$name %in% index_compounds, pcoa$name, NA)
+
+ggplot(pcoa, aes(x=V1, y=V2, color=group, label=index))+geom_point()+geom_label()+
+  scale_color_manual(values=c("#a6cee3", "#1f78b4", "#b2df8a", "#33a02c", "#fb9a99", "#e31a1c", "#fdbf6f", "#000000"))
+
+pc <- t(as.matrix(ldf[index_compounds]))
+pc <- cmdscale(dist(pc))
+pc <- as.data.frame(pc)
+pc$name <- rownames(pc)
+
+ggplot(pc, aes(x=V1, y=V2, label=name))+geom_label()
+
+```
+
