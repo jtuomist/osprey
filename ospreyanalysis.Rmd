@@ -83,6 +83,7 @@ index_compounds <- c("X123678_HxD", "X123678_HxF", "BDE_100", "PCB_128", "PCN_52
 ## Overview of the data
 
 ```{r overview}
+
 out <- list()
 for(col in colnames(df)[colnames(df) %in% index_compounds]) {
   g <- ggplot(df, aes_string(x="Year", y=col, color="Area"))+
@@ -164,6 +165,7 @@ cor(ldf[index_compounds], use="pairwise.complete.obs")
 chart.Correlation(ldf[colnames(ldf) %in% index_compounds], histogram=TRUE, pch=19)
 
 ```
+
 ## Bayesian hierarchical model
 
 The purpose of the Bayesian model was to estimate the peak year of the concentration for each congener. This did not
