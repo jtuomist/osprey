@@ -86,3 +86,14 @@ for(compound in compounds) {
   print(g)
   ggsave(paste0(path, compound, "_timetrend.png"))
 }
+
+library(GGally)
+library(ggplot2)
+
+# Complete pair plot with everything
+ggpairs(df[df$ID != "06K0441" , 10:17],
+        upper = list(continuous = wrap("cor", size = 3)),
+        lower = list(continuous = wrap("smooth", alpha = 0.3, size = 0.1)),
+        diag = list(continuous = wrap("densityDiag", alpha = 0.5))) +
+  theme_bw()
+ggsave("correlation_plot_metals.png", width = 10, height = 8)
